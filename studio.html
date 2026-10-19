@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI George Studio</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="assets/app.css">
+<script type="importmap">
+{ "imports": {
+  "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js",
+  "kokoro-js": "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js",
+  "phonemizer": "https://cdn.jsdelivr.net/npm/phonemizer@1.2.1/dist/phonemizer.js",
+  "path": "./js/stubs/empty.js",
+  "fs/promises": "./js/stubs/empty.js"
+} }
+</script>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div><span class="eyebrow">Instructor only · works on this computer</span><h1>AI George Studio</h1></div>
+    <a class="btn small" href="index.html">Open the live room</a>
+  </header>
+  <p class="banner" style="margin-bottom:16px">Everything you capture here stays in this browser until you publish. Publishing encrypts it with your class passphrase before it goes to GitHub.</p>
+  <div class="tabs" role="tablist" id="tabs">
+    <button class="tab" role="tab" data-tab="profile" aria-selected="true">1 · Profile</button>
+    <button class="tab" role="tab" data-tab="face" aria-selected="false">2 · Face</button>
+    <button class="tab" role="tab" data-tab="voice" aria-selected="false">3 · Voice</button>
+    <button class="tab" role="tab" data-tab="packs" aria-selected="false">4 · Course packs</button>
+    <button class="tab" role="tab" data-tab="publish" aria-selected="false">5 · Publish</button>
+  </div>
+  <main>
+    <section class="card panel" id="panel-profile"></section>
+    <section class="card panel" id="panel-face" hidden></section>
+    <section class="card panel" id="panel-voice" hidden></section>
+    <section class="card panel" id="panel-packs" hidden></section>
+    <section class="card panel" id="panel-publish" hidden></section>
+  </main>
+  <footer class="foot">AI George Live · open source · nothing here is sent anywhere until you publish</footer>
+</div>
+<script type="module" src="js/studio.js"></script>
+</body>
+</html>

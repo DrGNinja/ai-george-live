@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI George Live</title>
+<meta name="description" content="A live, talking AI coach for Dr. George Antoniou's courses. Runs entirely in your browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="assets/app.css">
+<script type="importmap">
+{ "imports": {
+  "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js",
+  "kokoro-js": "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js",
+  "phonemizer": "https://cdn.jsdelivr.net/npm/phonemizer@1.2.1/dist/phonemizer.js",
+  "path": "./js/stubs/empty.js",
+  "fs/promises": "./js/stubs/empty.js"
+} }
+</script>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div><span class="eyebrow" id="school">AI George Live</span><h1 id="title">Live AI coach</h1></div>
+    <div class="row"><span class="pill" id="gpuPill">Checking this computer…</span></div>
+  </header>
+
+  <!-- Gate: choose course, unlock, check device -->
+  <section id="gate" class="gate">
+    <div class="card stack">
+      <h2>Start a live session</h2>
+      <p class="muted">Talk with an AI coach that looks and sounds like your professor. It explains course concepts and reacts to your reasoning. It doesn't grade and won't write or solve homework.</p>
+      <label class="f">Course<select id="course"></select></label>
+      <label class="f">Class passphrase (from Canvas)<input type="password" id="pass" autocomplete="current-password" placeholder="Passphrase"></label>
+      <label class="row" style="font-size:13.5px;gap:8px"><input type="checkbox" id="remember"> Remember on this computer</label>
+      <label class="f">AI model size<select id="tier"></select></label>
+      <div class="row"><button class="btn primary" id="startBtn" type="button">Start session</button><span class="muted" id="gateMsg" style="font-size:13.5px"></span></div>
+      <div class="progress" id="progress" hidden></div>
+    </div>
+    <div class="card stack">
+      <h2 style="font-size:17px">How it works</h2>
+      <ul class="checks">
+        <li><span>🔒</span><span><strong>Private by design.</strong> The AI, speech recognition and voice all run on this computer. Your voice and camera never leave it.</span></li>
+        <li><span>⬇️</span><span><strong>First start downloads the AI</strong> (about 1–2.5 GB, once). Use campus Wi-Fi. Later visits start in seconds.</span></li>
+        <li><span>💻</span><span><strong>Needs Chrome or Edge</strong> on a laptop or desktop with a reasonably recent graphics chip.</span></li>
+        <li><span>🎓</span><span><strong>It's an AI clone, not your professor.</strong> Verify what it says against course sources. Canvas is the official word on grades and deadlines.</span></li>
+      </ul>
+      <p class="muted" style="font-size:13.5px">On a phone or older computer? Use the <a id="textCoach" target="_blank" rel="noopener">text coach</a> instead.</p>
+    </div>
+  </section>
+
+  <!-- Room -->
+  <section id="room" class="room" hidden>
+    <div>
+      <div class="stage" id="stage">
+        <canvas class="face" id="face" width="512" height="512" aria-label="Animated coach"></canvas>
+        <span class="badge">AI CLONE · NOT LIVE PERSON</span>
+        <span class="state"><span class="dot" id="stateDot"></span><span id="stateText">Ready</span></span>
+        <div class="level" id="level" aria-hidden="true"></div>
+        <div class="captions" id="captions" aria-live="polite"></div>
+        <div class="nameplate"><b id="coachName">AI George</b><span id="coachSub">AI coach</span></div>
+        <div class="selfview"><video id="self" playsinline muted></video><div class="off" id="selfOff">Camera off</div></div>
+      </div>
+      <div class="controls">
+        <button class="ctl" id="micBtn" type="button" aria-pressed="false">🎙️ Talk hands-free</button>
+        <button class="ctl" id="camBtn" type="button" aria-pressed="false">📷 Camera</button>
+        <button class="ctl" id="stopBtn" type="button">⏹ Stop talking</button>
+        <button class="ctl" id="capBtn" type="button" aria-pressed="true">CC Captions</button>
+        <button class="ctl end" id="endBtn" type="button">End</button>
+      </div>
+    </div>
+    <aside class="card side">
+      <header><span class="eyebrow">Conversation</span><span class="muted" style="font-size:13px">Not saved. Nothing is sent to your professor.</span></header>
+      <div class="log" id="log"></div>
+      <div>
+        <form class="compose" id="compose"><textarea id="q" rows="2" placeholder="Type a question, or turn on hands-free and just talk…" aria-label="Your question"></textarea><button class="btn primary" type="submit">Send</button></form>
+        <p class="hint">Coaching only: concepts, examples and feedback on your thinking. No grading, no homework writing.</p>
+      </div>
+    </aside>
+  </section>
+  <footer class="foot">Open source · runs in your browser · <a href="studio.html">Instructor Studio</a></footer>
+</div>
+<script type="module" src="js/live.js"></script>
+</body>
+</html>

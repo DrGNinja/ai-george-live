@@ -1,0 +1,6 @@
+# Never commit plain course packs, recordings or secrets
+*.pack.json
+my-voice-dataset*.zip
+starter/
+*.wav
+.DS_Store
