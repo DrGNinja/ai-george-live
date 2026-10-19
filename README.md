@@ -37,6 +37,7 @@ avatar.enc            encrypted face + voice bundle (published from the Studio)
 docs/SETUP.md         step-by-step setup for the instructor
 docs/VOICE.md         training a custom voice for free
 docs/PRIVACY.md       what students should know
+docs/TROUBLESHOOTING.md  fixes for blocked sites, camera, mic and slow starts
 tools/pt_to_bin.py    convert a trained Kokoro voice style to the browser format
 ```
 
