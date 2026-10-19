@@ -11,6 +11,7 @@ import { Mic, Whisper } from "./ears.js";
 import { Voice } from "./voice.js";
 import { FaceRig } from "./face.js";
 import { Presence } from "./presence.js";
+import { devicePanel } from "./devices.js";
 
 const S = { pack: null, avatar: null, index: null, history: [], busy: null, gpu: null, handsFree: false, captions: true };
 const brain = new Brain(), whisper = new Whisper(), voice = new Voice();
@@ -145,7 +146,7 @@ $("#micBtn").addEventListener("click", async e => {
     });
     await mic.start(); mic.gated = voice.speaking;
     S.handsFree = true; b.setAttribute("aria-pressed", "true"); setState("listen", "Listening");
-  } catch (err) { setState("", "Microphone blocked"); addMsg("ai", "I can't hear you because the microphone is blocked. Allow microphone access in the browser's address bar, or type your question."); }
+  } catch (err) { mic = null; setState("", "Microphone blocked"); addMsg("ai", err.message + "\n\nYou can also just type your question."); }
 });
 
 $("#camBtn").addEventListener("click", async e => {
@@ -158,7 +159,8 @@ $("#camBtn").addEventListener("click", async e => {
       else { mic.stop(); setState("", "Paused · I'll listen when you're back"); }
     } });
     await presence.start(); b.setAttribute("aria-pressed", "true"); $("#selfOff").hidden = true;
-  } catch { $("#selfOff").textContent = "Camera blocked"; }
+  } catch (err) { presence = null; $("#selfOff").textContent = "Camera blocked"; addMsg("ai", err.message + "\n\nThe camera is optional. The coach works without it."); }
 });
 
+$("#devCheck").append(devicePanel({ needCamera: true, needMic: true }));
 initGate();

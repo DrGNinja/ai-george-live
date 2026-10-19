@@ -5,6 +5,7 @@ import { LIBS, KOKORO_MALE_VOICES, PATHS } from "./config.js";
 import { sealJSON } from "./vault.js";
 import { chunkText, extractText, scriptSentences } from "./importers.js";
 import { toWav } from "./wav.js";
+import { getStream, devicePanel } from "./devices.js";
 import { FaceRig } from "./face.js";
 import { Voice } from "./voice.js";
 import { STEPS, SIZE, loadLandmarker, align, blend, rank, regionsFrom, alignStill } from "./facecap.js";
@@ -48,8 +49,8 @@ async function renderFace() {
   const regionScale = el("input", { type: "range", min: "0.8", max: "1.5", step: "0.05", value: String(store.get("mouthScale", 1)), id: "mouthScale", "aria-label": "Mouth area size" });
 
   const startCam = el("button", { class: "btn", type: "button", onclick: async () => {
-    try { camStream = camStream || await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 960 }, facingMode: "user" }, audio: false }); video.srcObject = camStream; await video.play(); prompt.textContent = "Good light on your face, camera at eye level, plain background."; status(msg, "Loading face tracking…"); await loadLandmarker(); status(msg, "Ready. Press Record face.", "ok"); }
-    catch (e) { status(msg, "Camera or face tracking couldn't start: " + (e.message || e), "err"); }
+    try { camStream = camStream || await getStream({ video: { width: { ideal: 1280 }, height: { ideal: 960 }, facingMode: "user" }, audio: false }, "camera"); video.srcObject = camStream; await video.play(); prompt.textContent = "Good light on your face, camera at eye level, plain background."; status(msg, "Loading face tracking…"); await loadLandmarker(); status(msg, "Ready. Press Record face.", "ok"); }
+    catch (e) { status(msg, camStream ? "Face tracking couldn't load: " + (e.message || e) : e.message, "err"); }
   } }, "Turn on camera");
 
   const recBtn = el("button", { class: "btn primary", type: "button", onclick: async () => {
@@ -119,7 +120,7 @@ async function renderFace() {
   } }, "Test talking");
   const saveBtn = el("button", { class: "btn primary", type: "button", onclick: async () => { const f = await currentFace(); if (!f) return status(msg, "Record your face first.", "err"); await idb.set("face", f); status(msg, `Saved face (${Math.round(JSON.stringify(f).length / 1024)} KB).`, "ok"); } }, "Save face");
 
-  box.append(el("h2", {}, "Your face"),
+  box.append(el("h2", {}, "Your face"), devicePanel({ needCamera: true, needMic: false }),
     el("p", { class: "muted" }, "The camera records about 20 seconds while you follow six prompts. Face tracking runs on this computer, lines up every frame on your eyes and picks the best frame for each mouth shape. Students see these real frames blended as you speak."),
     el("div", { class: "two" },
       el("div", { class: "stack" }, cam, el("div", { class: "row" }, startCam, recBtn, selfieBtn), el("label", { class: "f" }, "Or upload a front-facing photo", upload), msg),
@@ -186,7 +187,7 @@ async function renderVoice() {
   recBtn.addEventListener("click", async () => {
     if (recorder) { recorder.stop(); return; }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
+      const stream = await getStream({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } }, "microphone");
       const chunks = []; recorder = new MediaRecorder(stream);
       recorder.ondataavailable = e => chunks.push(e.data);
       recorder.onstop = async () => {
@@ -198,7 +199,7 @@ async function renderVoice() {
         recIdx = Math.min(lines.length - 1, recIdx + 1); updateLine();
       };
       recorder.start(); recBtn.textContent = "■ Stop"; status(recMsg, "Recording… read the line naturally, then press Stop.");
-    } catch (e) { status(recMsg, "Microphone blocked: " + (e.message || e), "err"); }
+    } catch (e) { status(recMsg, e.message, "err"); }
   });
   playBtn.addEventListener("click", async () => { const w = await idb.get("rec:" + recIdx) || await idb.get("rec:" + Math.max(0, recIdx - 1)); if (w) new Audio(URL.createObjectURL(w)).play(); });
   const exportBtn = el("button", { class: "btn primary", type: "button", onclick: async () => {
@@ -212,7 +213,7 @@ async function renderVoice() {
   } }, "Export recordings (.zip)");
   updateLine();
 
-  box.append(el("h2", {}, "Your voice"),
+  box.append(el("h2", {}, "Your voice"), devicePanel({ needCamera: false, needMic: true }),
     el("div", { class: "two" },
       el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "Step 1 · Coach voice that works today"),
         el("p", { class: "muted" }, "Blend open-source Kokoro voices until it sounds closest to you. Students hear this voice until your trained voice is ready. It runs in their browser."),

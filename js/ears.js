@@ -2,6 +2,7 @@
 // Audio never leaves the device.
 
 import { LIBS, STT_MODEL } from "./config.js";
+import { getStream } from "./devices.js";
 
 const WORKLET = `class Tap extends AudioWorkletProcessor { process(inputs) { const ch = inputs[0] && inputs[0][0]; if (ch) this.port.postMessage(ch.slice(0)); return true; } } registerProcessor("tap", Tap);`;
 
@@ -13,7 +14,7 @@ export class Mic {
   }
   async start() {
     if (this.ctx) { this.listening = true; return; }
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    this.stream = await getStream({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } }, "microphone");
     this.ctx = new AudioContext({ sampleRate: this.rate });
     const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
     await this.ctx.audioWorklet.addModule(url);

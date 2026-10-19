@@ -2,6 +2,7 @@
 // when someone is there. Video frames are never stored, uploaded or sent to any model.
 
 import { LIBS } from "./config.js";
+import { getStream } from "./devices.js";
 
 export class Presence {
   constructor(video, { onChange } = {}) {
@@ -9,7 +10,7 @@ export class Presence {
     this.present = false; this.lastSeen = 0; this.timer = null;
   }
   async start() {
-    this.stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }, audio: false });
+    this.stream = await getStream({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }, audio: false }, "camera");
     this.video.srcObject = this.stream; await this.video.play().catch(() => {});
     try {
       const { FilesetResolver, FaceDetector } = await import(LIBS.mediapipe);
