@@ -36,26 +36,109 @@ async function renderProfile() {
 }
 
 /* ---------- 2 · face ---------- */
-let camStream = null, cands = {}, picks = {}, previewRig = null, previewVoice = null;
+let camStream = null, picks = {}, draft = null, previewRig = null, previewVoice = null;
+// draft = { kind: "frames", picks, scale, shift } from a recording, or { kind: "photo", photo, mouth } from a selfie/upload.
+function stopCamera() { camStream?.getTracks().forEach(t => t.stop()); camStream = null; }
+function describe(face) {
+  if (!face) return "Nothing saved yet.";
+  if (face.frames) return `Saved: recorded face (${Object.keys(face.frames).length} frames).`;
+  if (face.photo) return "Saved: single photo.";
+  return "Saved.";
+}
+function draftToFace(d) {
+  if (!d) return null;
+  if (d.kind === "photo") return { photo: d.photo, mouth: { ...d.mouth } };
+  let base, frames;
+  if (d.kind === "saved") { base = d.base; frames = d.frames; }
+  else {
+    if (!d.picks.neutral?.length) return null;
+    base = regionsFrom(d.picks.neutral[0].points);
+    frames = {}; for (const s of STEPS) if (d.picks[s.key]?.[0]) frames[s.key] = d.picks[s.key][0].canvas.toDataURL("image/webp", 0.86);
+  }
+  const regions = JSON.parse(JSON.stringify(base));
+  regions.mouth.rx *= d.scale; regions.mouth.ry *= d.scale; regions.mouth.cy += d.shift;
+  return { size: SIZE, frames, regions, baseRegions: base, tune: { scale: d.scale, shift: d.shift } };
+}
 async function renderFace() {
   const box = $("#panel-face"); box.innerHTML = "";
+  const saved = await idb.get("face");
+  if (!draft && saved?.photo) draft = { kind: "photo", photo: saved.photo, mouth: { ...saved.mouth } };
+  if (!draft && saved?.frames) draft = { kind: "saved", frames: saved.frames, base: saved.baseRegions || saved.regions, scale: saved.tune?.scale || 1, shift: saved.tune?.shift || 0 };
   const video = el("video", { playsinline: true, muted: true });
-  const prompt = el("div", { class: "prompt" }, "Turn on your camera to begin");
+  const prompt = el("div", { class: "prompt" }, camStream ? "Camera on." : "Turn on your camera to begin");
   const count = el("div", { class: "count", hidden: true });
   const cam = el("div", { class: "cam" }, video, prompt, count);
+  if (camStream) { video.srcObject = camStream; video.play().catch(() => {}); }
   const msg = el("div", { class: "log-line" });
-  const prevCanvas = el("canvas", { width: SIZE, height: SIZE, style: { width: "100%", aspectRatio: "1", borderRadius: "12px", background: "#0b1424" } });
+  const savedLine = el("div", { class: "pill" }, describe(saved));
+  const prevCanvas = el("canvas", { width: SIZE, height: SIZE, style: { width: "100%", aspectRatio: "1", borderRadius: "12px", background: "#0b1424", cursor: "crosshair" } });
   const slotsBox = el("div", { class: "stack" });
-  const regionScale = el("input", { type: "range", min: "0.8", max: "1.5", step: "0.05", value: String(store.get("mouthScale", 1)), id: "mouthScale", "aria-label": "Mouth area size" });
+  const adjustBox = el("div", { class: "stack", style: { gap: "8px" } });
+  const guides = el("input", { type: "checkbox", checked: true, id: "showGuides" });
 
-  const startCam = el("button", { class: "btn", type: "button", onclick: async () => {
-    try { camStream = camStream || await getStream({ video: { width: { ideal: 1280 }, height: { ideal: 960 }, facingMode: "user" }, audio: false }, "camera"); video.srcObject = camStream; await video.play(); prompt.textContent = "Good light on your face, camera at eye level, plain background."; status(msg, "Loading face tracking…"); await loadLandmarker(); status(msg, "Ready. Press Record face.", "ok"); }
-    catch (e) { status(msg, camStream ? "Face tracking couldn't load: " + (e.message || e) : e.message, "err"); }
-  } }, "Turn on camera");
+  async function refreshPreview() {
+    const face = draftToFace(draft) || saved;
+    previewRig = previewRig && previewRig.canvas === prevCanvas ? previewRig : new FaceRig(prevCanvas);
+    previewRig.guide = guides.checked;
+    if (face) await previewRig.load(face); else { const g = prevCanvas.getContext("2d"); g.clearRect(0, 0, SIZE, SIZE); }
+    drawAdjust(); drawSlots();
+  }
+  guides.addEventListener("change", () => { if (previewRig) previewRig.guide = guides.checked; });
+
+  // Click on the preview to place the lip line, then the chin (single-photo faces).
+  let clickStep = 0;
+  prevCanvas.addEventListener("click", e => {
+    if (draft?.kind !== "photo") return;
+    const r = prevCanvas.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    if (clickStep === 0) { draft.mouth.x = x; draft.mouth.y = y; if (draft.mouth.chin <= y + 0.03) draft.mouth.chin = y + 0.12; clickStep = 1; status(msg, "Now click the bottom of your chin."); }
+    else { draft.mouth.chin = Math.max(draft.mouth.y + 0.03, y); clickStep = 0; status(msg, "Mouth placed. Press Test talking, then Save face.", "ok"); }
+    previewRig.mouth = draft.mouth; drawAdjust();
+  });
+
+  function slider(label, min, max, step, value, on) {
+    const r = el("input", { type: "range", min, max, step, value: String(value), "aria-label": label });
+    r.addEventListener("input", () => on(+r.value));
+    return el("label", { class: "f" }, label, r);
+  }
+  function drawAdjust() {
+    adjustBox.innerHTML = "";
+    if (!draft) { adjustBox.append(el("p", { class: "muted" }, "Record your face, take a selfie or upload a photo to adjust it here.")); return; }
+    if (draft.kind === "photo") {
+      adjustBox.append(el("p", { class: "muted", style: { fontSize: "13.5px" } }, "Single photo: click the preview once on the line between your lips, then once at the bottom of your chin. The orange and blue guides show where the mouth will move."),
+        slider("Mouth width", 0.03, 0.16, 0.005, draft.mouth.w, v => { draft.mouth.w = v; previewRig.mouth = draft.mouth; }));
+    } else {
+      adjustBox.append(el("p", { class: "muted", style: { fontSize: "13.5px" } }, "Recorded face: the orange oval is the area that changes as you talk. It should cover your lips and chin, not your nose."),
+        slider("Mouth area size", 0.8, 1.5, 0.05, draft.scale, async v => { draft.scale = v; await refreshPreviewOnly(); }),
+        slider("Move mouth area up or down", -0.06, 0.06, 0.005, draft.shift, async v => { draft.shift = v; await refreshPreviewOnly(); }));
+    }
+  }
+  let pending = null;
+  async function refreshPreviewOnly() { clearTimeout(pending); pending = setTimeout(async () => { const f = draftToFace(draft); if (f) await previewRig.load(f); }, 120); }
+
+  function drawSlots() {
+    slotsBox.innerHTML = "";
+    if (draft?.kind !== "frames") { if (draft?.kind === "saved") slotsBox.append(el("p", { class: "muted", style: { fontSize: "13px" } }, "To swap individual frames, record again.")); return; }
+    slotsBox.append(el("span", { class: "eyebrow" }, "Frames (click a small one to swap it in)"), el("div", { class: "frames" }, STEPS.map(s => {
+      const best = draft.picks[s.key]?.[0];
+      return el("div", { class: "frame" }, best ? el("img", { src: best.canvas.toDataURL("image/jpeg", .8), alt: s.key }) : el("div", { class: "muted" }, "missing"), el("strong", {}, s.key),
+        el("div", { class: "row", style: { gap: "4px" } }, (draft.picks[s.key] || []).slice(1).map((alt, i) => el("span", { class: "frame alt", style: { width: "44px" } }, el("img", { src: alt.canvas.toDataURL("image/jpeg", .6), alt: "alternative", title: "Use this one", onclick: async () => { const arr = draft.picks[s.key]; [arr[0], arr[i + 1]] = [arr[i + 1], arr[0]]; await refreshPreview(); } })))));
+    })));
+  }
+
+  const camBtn = el("button", { class: "btn", type: "button" }, camStream ? "Turn off camera" : "Turn on camera");
+  camBtn.addEventListener("click", async () => {
+    if (camStream) { stopCamera(); video.srcObject = null; camBtn.textContent = "Turn on camera"; prompt.textContent = "Camera off."; return; }
+    try {
+      camStream = await getStream({ video: { width: { ideal: 1280 }, height: { ideal: 960 }, facingMode: "user" }, audio: false }, "camera");
+      video.srcObject = camStream; await video.play(); camBtn.textContent = "Turn off camera";
+      prompt.textContent = "Good light on your face, camera at eye level, plain background.";
+      status(msg, "Loading face tracking…"); await loadLandmarker(); status(msg, "Ready. Press Record face.", "ok");
+    } catch (e) { status(msg, camStream ? "Face tracking couldn't load: " + (e.message || e) : e.message, "err"); }
+  });
 
   const recBtn = el("button", { class: "btn primary", type: "button", onclick: async () => {
     if (!camStream) return status(msg, "Turn on the camera first.", "err");
-    const lm = await loadLandmarker(); recBtn.disabled = true; cands = {};
+    const lm = await loadLandmarker(); recBtn.disabled = true; const cands = {};
     for (const step of STEPS) {
       cands[step.key] = [];
       prompt.textContent = step.say; count.hidden = false;
@@ -69,69 +152,62 @@ async function renderFace() {
         await sleep(90);
       }
     }
-    count.hidden = true; prompt.textContent = "Done. Check the frames on the right.";
-    picks = {}; for (const s of STEPS) picks[s.key] = rank(s.key, cands[s.key], 3);
-    const missing = STEPS.filter(s => !picks[s.key].length).map(s => s.key);
-    status(msg, missing.length ? "No face found during: " + missing.join(", ") + ". Re-record with your face centered." : "Captured. Pick alternatives if a frame looks off, then Save face.", missing.length ? "err" : "ok");
-    recBtn.disabled = false; drawSlots(); await buildPreview();
+    count.hidden = true; prompt.textContent = "Done. Check the preview on the right.";
+    const p = {}; for (const s of STEPS) p[s.key] = rank(s.key, cands[s.key], 3);
+    const missing = STEPS.filter(s => !p[s.key].length).map(s => s.key);
+    recBtn.disabled = false;
+    if (!p.neutral.length) return status(msg, "No face was found. Center your face and try again.", "err");
+    draft = { kind: "frames", picks: p, scale: 1, shift: 0 };
+    status(msg, missing.length ? "Some shapes weren't captured: " + missing.join(", ") + ". You can record again." : "Captured. Check the preview, adjust if needed, then Save face.", missing.length ? "err" : "ok");
+    await refreshPreview();
   } }, "Record face (about 20 s)");
 
+  async function usePhoto(a) {
+    const pt = a.points;
+    draft = { kind: "photo", photo: a.canvas.toDataURL("image/webp", 0.88), mouth: { x: (pt[61].x + pt[291].x) / 2, y: (pt[13].y + pt[14].y) / 2, w: (pt[291].x - pt[61].x) / 2 * 1.1, chin: pt[152].y } };
+    clickStep = 0; await refreshPreview();
+    status(msg, "Photo loaded. Check the guides on the preview: if they're off, click the lip line, then the chin. Then Save face.", "ok");
+  }
   const selfieBtn = el("button", { class: "btn", type: "button", onclick: async () => {
     if (!camStream) return status(msg, "Turn on the camera first.", "err");
-    const a = await alignStill(video); if (!a) return status(msg, "No face found. Look at the camera.", "err");
-    await savePhotoFace(a); status(msg, "Selfie saved as a single-photo face. Recording the full face gives a much better result.", "ok"); await buildPreview(await idb.get("face"));
-  } }, "Take a selfie instead");
+    try { const a = await alignStill(video); if (!a) return status(msg, "No face found. Look at the camera.", "err"); await usePhoto(a); }
+    catch (e) { status(msg, "Face tracking couldn't load: " + (e.message || e), "err"); }
+  } }, "Take a selfie");
   const upload = el("input", { type: "file", accept: "image/*", id: "faceUpload" });
   upload.addEventListener("change", async () => {
     const f = upload.files[0]; if (!f) return;
     const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
-    try { const a = await alignStill(img); if (!a) return status(msg, "No face found in that photo.", "err"); await savePhotoFace(a); status(msg, "Photo saved as a single-photo face.", "ok"); await buildPreview(await idb.get("face")); }
+    try { const a = await alignStill(img); if (!a) return status(msg, "No face found in that photo. Use a front-facing photo.", "err"); await usePhoto(a); }
     catch (e) { status(msg, "Face tracking couldn't load: " + (e.message || e), "err"); }
+    upload.value = "";
   });
 
-  function drawSlots() {
-    slotsBox.innerHTML = "";
-    if (!Object.keys(picks).length) { slotsBox.append(el("p", { class: "muted" }, "Frames appear here after recording.")); return; }
-    slotsBox.append(el("div", { class: "frames" }, STEPS.map(s => {
-      const best = picks[s.key]?.[0];
-      return el("div", { class: "frame" }, best ? el("img", { src: best.canvas.toDataURL("image/jpeg", .8), alt: s.key }) : el("div", { class: "muted" }, "missing"), el("strong", {}, s.key),
-        el("div", { class: "row", style: { gap: "4px" } }, (picks[s.key] || []).slice(1).map((alt, i) => el("span", { class: "frame alt", style: { width: "44px" } }, el("img", { src: alt.canvas.toDataURL("image/jpeg", .6), alt: "alternative", title: "Use this one", onclick: async () => { const arr = picks[s.key]; [arr[0], arr[i + 1]] = [arr[i + 1], arr[0]]; drawSlots(); await buildPreview(); } })))));
-    })));
-  }
-  async function currentFace() {
-    if (!picks.neutral?.length) return null;
-    const regions = regionsFrom(picks.neutral[0].points), k = +regionScale.value;
-    regions.mouth.rx *= k; regions.mouth.ry *= k; regions.mouth.cy += (k - 1) * regions.mouth.ry * 0.25;
-    const frames = {}; for (const s of STEPS) if (picks[s.key]?.[0]) frames[s.key] = picks[s.key][0].canvas.toDataURL("image/webp", 0.86);
-    return { size: SIZE, frames, regions };
-  }
-  async function buildPreview(face) {
-    face = face || await currentFace() || await idb.get("face");
-    previewRig = previewRig || new FaceRig(prevCanvas);
-    if (previewRig.canvas !== prevCanvas) { previewRig = new FaceRig(prevCanvas); }
-    if (face) await previewRig.load(face);
-  }
-  regionScale.addEventListener("input", async () => { store.set("mouthScale", +regionScale.value); await buildPreview(); });
   const testBtn = el("button", { class: "btn", type: "button", onclick: async () => {
     if (!previewRig?.ready) return status(msg, "Record or load a face first.", "err");
     const line = "Hello Fighting Knights. I'm your AI coach. Ask me about risk assessment, controls, or anything from this week.";
     if (previewVoice?.mode === "kokoro") { previewRig.attach(previewVoice.analyser); previewVoice.onStart = () => previewRig.speaking = true; previewVoice.onEnd = () => previewRig.speaking = false; previewVoice.say(line); }
-    else { const u = new SpeechSynthesisUtterance(line); previewRig.attach(null); u.onstart = () => previewRig.speaking = true; u.onboundary = () => previewRig.boundary(); u.onend = () => previewRig.speaking = false; speechSynthesis.speak(u); }
+    else { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(line); previewRig.attach(null); u.onstart = () => previewRig.speaking = true; u.onboundary = () => previewRig.boundary(); u.onend = () => previewRig.speaking = false; speechSynthesis.speak(u); }
   } }, "Test talking");
-  const saveBtn = el("button", { class: "btn primary", type: "button", onclick: async () => { const f = await currentFace(); if (!f) return status(msg, "Record your face first.", "err"); await idb.set("face", f); status(msg, `Saved face (${Math.round(JSON.stringify(f).length / 1024)} KB).`, "ok"); } }, "Save face");
+  const saveBtn = el("button", { class: "btn primary", type: "button", onclick: async () => {
+    const f = draftToFace(draft); if (!f) return status(msg, "Record your face, take a selfie or upload a photo first.", "err");
+    await idb.set("face", f); savedLine.textContent = describe(f); savedLine.className = "pill good"; status(msg, `Saved (${Math.round(JSON.stringify(f).length / 1024)} KB). Publish again for students to see it.`, "ok");
+  } }, "Save face");
+  const discardBtn = el("button", { class: "btn small", type: "button", onclick: async () => { draft = null; clickStep = 0; await renderFace(); status($("#panel-face .two .log-line"), "Unsaved changes discarded."); } }, "Discard unsaved changes");
+  const clearBtn = el("button", { class: "btn small danger", type: "button", onclick: async e => {
+    if (e.currentTarget.dataset.c !== "1") { e.currentTarget.dataset.c = "1"; e.currentTarget.textContent = "Click again to delete the saved face"; return; }
+    await idb.del("face"); draft = null; previewRig = null; stopCamera(); await renderFace(); status($("#panel-face .two .log-line"), "Saved face deleted from this browser. Publish again to remove it for students.", "ok");
+  } }, "Delete saved face");
 
   box.append(el("h2", {}, "Your face"), devicePanel({ needCamera: true, needMic: false }),
-    el("p", { class: "muted" }, "The camera records about 20 seconds while you follow six prompts. Face tracking runs on this computer, lines up every frame on your eyes and picks the best frame for each mouth shape. Students see these real frames blended as you speak."),
+    el("p", { class: "muted" }, "Best result: Record face. The camera records about 20 seconds while you follow six prompts, and the best frame for each mouth shape is picked automatically. A selfie or uploaded photo also works, with a simpler mouth movement."),
     el("div", { class: "two" },
-      el("div", { class: "stack" }, cam, el("div", { class: "row" }, startCam, recBtn, selfieBtn), el("label", { class: "f" }, "Or upload a front-facing photo", upload), msg),
-      el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "Preview"), prevCanvas, el("label", { class: "f" }, "Mouth area size (raise it if you see a seam at the chin)", regionScale), el("div", { class: "row" }, testBtn, saveBtn), slotsBox)));
-  drawSlots(); buildPreview(await idb.get("face"));
+      el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "1 · Capture"), cam, el("div", { class: "row" }, camBtn, recBtn, selfieBtn),
+        el("label", { class: "f" }, "Or upload a front-facing photo", upload), msg),
+      el("div", { class: "stack" }, el("div", { class: "row", style: { justifyContent: "space-between" } }, el("span", { class: "eyebrow" }, "2 · Check and adjust"), savedLine),
+        prevCanvas, el("label", { class: "row", style: { fontSize: "13.5px", gap: "8px" } }, guides, "Show guides"), adjustBox,
+        el("div", { class: "row" }, testBtn, saveBtn), el("div", { class: "row" }, discardBtn, clearBtn), slotsBox)));
+  await refreshPreview();
 }
-async function savePhotoFace(a) {
-  const p = a.points, mw = (p[291].x - p[61].x) / 2;
-  await idb.set("face", { photo: a.canvas.toDataURL("image/webp", 0.88), mouth: { x: (p[61].x + p[291].x) / 2, y: (p[13].y + p[14].y) / 2, w: mw, chin: p[152].y } });
-}
-
 /* ---------- 3 · voice ---------- */
 const SAMPLE = "Risk is not the same as a vulnerability. A vulnerability is a weakness; risk also depends on the threat, the likelihood and the business impact.";
 const INTRO_LINES = [

@@ -43,6 +43,7 @@ export class FaceRig {
       this.layers = {};
       for (const v of VISEMES) { const src = imgs[v] || imgs.open || imgs.mid; if (src) this.layers[v] = maskedLayer(src, size, face.regions.mouth); }
       if (imgs.blink) this.blinkLayer = maskedLayer(imgs.blink, size, face.regions.eyes, 0.55);
+      this.regions = face.regions;
       this.kind = "frames";
     } else if (face?.photo) {
       this.photo = await loadImg(face.photo); this.mouth = face.mouth || { x: .5, y: .62, w: .08, chin: .75 };
@@ -93,35 +94,57 @@ export class FaceRig {
   }
 
   _draw(now) {
-    const g = this.ctx, S = this.size, t = (now - this.t0) / 1000;
-    g.save(); g.clearRect(0, 0, S, S);
-    if (!this.reduce) {
-      const dx = Math.sin(t * 0.7) * S * 0.004, dy = Math.sin(t * 0.9 + 1) * S * 0.003 + this.level * S * 0.004;
-      const rot = Math.sin(t * 0.5) * 0.006;
-      g.translate(S / 2 + dx, S / 2 + dy); g.rotate(rot); g.scale(1.015, 1.015); g.translate(-S / 2, -S / 2);
-    }
+    const S = this.size, t = (now - this.t0) / 1000;
+    // 1. Compose the face in a still, untransformed buffer so every layer lines up exactly.
+    if (!this.comp || this.comp.width !== S) { this.comp = document.createElement("canvas"); this.comp.width = this.comp.height = S; }
+    const c = this.comp.getContext("2d");
+    c.clearRect(0, 0, S, S);
     if (this.kind === "frames") {
-      g.drawImage(this.base, 0, 0, S, S);
-      for (const v of VISEMES) { const w = this.w[v]; if (w > 0.02 && this.layers[v]) { g.globalAlpha = clamp(w * 1.3); g.drawImage(this.layers[v], 0, 0); } }
-      if (this.blink > 0.02 && this.blinkLayer) { g.globalAlpha = this.blink; g.drawImage(this.blinkLayer, 0, 0); }
-      g.globalAlpha = 1;
-    } else if (this.kind === "photo") this._drawPhoto(g, S);
+      c.drawImage(this.base, 0, 0, S, S);
+      for (const v of VISEMES) { const w = this.w[v]; if (w > 0.02 && this.layers[v]) { c.globalAlpha = clamp(w * 1.3); c.drawImage(this.layers[v], 0, 0); } }
+      if (this.blink > 0.02 && this.blinkLayer) { c.globalAlpha = this.blink; c.drawImage(this.blinkLayer, 0, 0); }
+      c.globalAlpha = 1;
+    } else if (this.kind === "photo") this._drawPhoto(c, S);
+    if (this.guide) this._drawGuide(c, S);
+    // 2. Show it with gentle head motion applied to the whole picture at once.
+    const g = this.ctx;
+    g.save(); g.clearRect(0, 0, S, S);
+    if (!this.reduce && !this.guide) {
+      const dx = Math.sin(t * 0.7) * S * 0.004, dy = Math.sin(t * 0.9 + 1) * S * 0.003 + this.level * S * 0.004;
+      g.translate(S / 2 + dx, S / 2 + dy); g.rotate(Math.sin(t * 0.5) * 0.006); g.scale(1.015, 1.015); g.translate(-S / 2, -S / 2);
+    }
+    g.drawImage(this.comp, 0, 0);
     g.restore();
   }
 
-  _drawPhoto(g, S) { // single-photo fallback: shift the lower jaw down and show a dark mouth gap
+  _drawPhoto(c, S) { // single-photo face: shift the lower jaw down and show a dark mouth gap
     const img = this.photo, m = this.mouth;
     const s = Math.min(img.naturalWidth, img.naturalHeight), sx = (img.naturalWidth - s) / 2, sy = (img.naturalHeight - s) / 2;
-    g.drawImage(img, sx, sy, s, s, 0, 0, S, S);
-    const open = this.w.open + this.w.mid * 0.6 + this.w.wide * 0.5 + this.w.round * 0.5;
+    c.drawImage(img, sx, sy, s, s, 0, 0, S, S);
+    const open = Math.min(1, this.w.open + this.w.mid * 0.6 + this.w.wide * 0.5 + this.w.round * 0.5);
     if (open < 0.03) return;
-    const mx = m.x * S, my = m.y * S, mw = m.w * S, cy = m.chin * S, drop = open * (cy - my) * 0.16;
-    const jw = Math.ceil(mw * 3.2), jh = Math.ceil((cy - my) * 1.35), J = this.jaw; J.width = jw; J.height = jh;
-    const jc = J.getContext("2d"); jc.drawImage(this.canvas, mx - jw / 2, my, jw, jh, 0, 0, jw, jh);
+    const k = s / S; // image pixels per canvas pixel
+    const mx = m.x * S, my = m.y * S, mw = m.w * S, cy = m.chin * S, drop = open * (cy - my) * 0.18;
+    const jw = Math.ceil(mw * 3.2), jh = Math.ceil((cy - my) * 1.4), J = this.jaw; J.width = jw; J.height = jh;
+    const jc = J.getContext("2d");
+    jc.drawImage(img, sx + (mx - jw / 2) * k, sy + my * k, jw * k, jh * k, 0, 0, jw, jh); // straight from the photo
     jc.globalCompositeOperation = "destination-in";
-    const gr = jc.createRadialGradient(jw / 2, jh * .32, 0, jw / 2, jh * .32, jw * .5); gr.addColorStop(0, "#000"); gr.addColorStop(.7, "#000"); gr.addColorStop(1, "rgba(0,0,0,0)");
+    const gr = jc.createRadialGradient(jw / 2, jh * .3, 0, jw / 2, jh * .3, jw * .5); gr.addColorStop(0, "#000"); gr.addColorStop(.72, "#000"); gr.addColorStop(1, "rgba(0,0,0,0)");
     jc.fillStyle = gr; jc.fillRect(0, 0, jw, jh);
-    g.fillStyle = "rgba(38,14,14,.92)"; g.beginPath(); g.ellipse(mx, my + drop * .5, mw * .72, Math.max(1, drop * .6), 0, 0, Math.PI * 2); g.fill();
-    g.drawImage(J, mx - jw / 2, my + drop);
+    c.fillStyle = "rgba(58,22,22,.86)"; c.beginPath(); c.ellipse(mx, my + drop * .5, mw * .8, Math.max(1, drop * .62), 0, 0, Math.PI * 2); c.fill();
+    c.drawImage(J, mx - jw / 2, my + drop);
+  }
+
+  _drawGuide(c, S) { // calibration overlay for the Studio
+    c.save(); c.lineWidth = 2; c.setLineDash([6, 4]);
+    if (this.kind === "photo") {
+      const m = this.mouth;
+      c.strokeStyle = "#e3a64a"; c.beginPath(); c.moveTo((m.x - m.w) * S, m.y * S); c.lineTo((m.x + m.w) * S, m.y * S); c.stroke();
+      c.strokeStyle = "#7ea4e4"; c.beginPath(); c.moveTo((m.x - m.w) * S, m.chin * S); c.lineTo((m.x + m.w) * S, m.chin * S); c.stroke();
+    } else if (this.regions) {
+      const r = this.regions.mouth; c.strokeStyle = "#e3a64a"; c.beginPath(); c.ellipse(r.cx * S, r.cy * S, r.rx * S, r.ry * S, 0, 0, Math.PI * 2); c.stroke();
+      const e = this.regions.eyes; c.strokeStyle = "#7ea4e4"; c.beginPath(); c.ellipse(e.cx * S, e.cy * S, e.rx * S, e.ry * S, 0, 0, Math.PI * 2); c.stroke();
+    }
+    c.restore();
   }
 }
